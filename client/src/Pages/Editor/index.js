@@ -36,7 +36,6 @@ CodeMirrorLoader
         width: window.innerWidth,
         height: window.innerHeight
       },
-      online: process.env.NODE_ENV === 'production' ? window.navigator.onLine : true,
       vimMode: localStorage.getItem('Pages.Editor.vimMode') === 'true',
       acceptedTermsVersion,
       latestTermsVersion,
@@ -74,14 +73,6 @@ CodeMirrorLoader
 
     app.ports.saveVimMode.subscribe(enabled => {
       localStorage.setItem('Pages.Editor.vimMode', enabled)
-    })
-
-    window.addEventListener('online', function () {
-      app.ports.online.send(true)
-    })
-
-    window.addEventListener('offline', function () {
-      app.ports.online.send(false)
     })
 
     window.addEventListener('beforeunload', function (e) {

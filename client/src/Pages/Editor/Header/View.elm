@@ -8,6 +8,7 @@ module Pages.Editor.Header.View
 
 import Data.Ellie.RevisionId as RevisionId exposing (RevisionId)
 import Data.Ellie.TermsVersion as TermsVersion exposing (TermsVersion)
+import Ellie.Constants as Constants
 import Ellie.Ui.Button as Button
 import Ellie.Ui.Checkbox as Checkbox
 import Ellie.Ui.CopyLink as CopyLink
@@ -19,7 +20,6 @@ import Html.Attributes exposing (href, tabindex, target, title)
 import Pages.Editor.Header.Model exposing (Model)
 import Pages.Editor.Header.Styles as Styles
 import Pages.Editor.Header.Update exposing (Msg(..))
-import Ellie.Constants as Constants
 import Svg exposing (svg, use)
 import Svg.Attributes exposing (xlinkHref)
 
@@ -42,7 +42,6 @@ type alias Config msg =
     , embedLinkButtonEnabled : Bool
     , saveButtonEnabled : Bool
     , saveButtonOption : SaveOption
-    , buttonsVisible : Bool
     , revisionId : Maybe RevisionId
     , termsState : TermsState msg
     , onSave : msg
@@ -136,113 +135,110 @@ viewSaveButton config =
 
 viewLeftSide : Config msg -> List (Html msg)
 viewLeftSide config =
-    if config.buttonsVisible then
-        case config.termsState of
-            Visible onAccept version ->
-                [ viewLogo
-                , Checkbox.view
-                    { onChange = \_ -> onAccept version
-                    , checked = False
-                    , id = "accept_terms"
-                    , label =
-                        span [ Styles.termsLabel ]
-                            [ text "Please accept our "
-                            , a [ href <| TermsVersion.link version ] [ text "Terms of Service" ]
-                            , text " before saving."
-                            ]
+    case config.termsState of
+        Visible onAccept version ->
+            [ viewLogo
+            , Checkbox.view
+                { onChange = \_ -> onAccept version
+                , checked = False
+                , id = "accept_terms"
+                , label =
+                    span [ Styles.termsLabel ]
+                        [ text "Please accept our "
+                        , a [ href <| TermsVersion.link version ] [ text "Terms of Service" ]
+                        , text " before saving."
+                        ]
+                }
+            ]
+
+        Accepting version ->
+            [ viewLogo
+            , Checkbox.view
+                { onChange = \_ -> config.mapMsg NoOp
+                , checked = True
+                , id = "accept_terms"
+                , label =
+                    span [ Styles.termsLabel ]
+                        [ text "Please accept our "
+                        , a [ href <| TermsVersion.link version ] [ text "Terms of Service" ]
+                        , text " before saving."
+                        ]
+                }
+            ]
+
+        Accepted ->
+            [ viewLogo
+            , div [ Styles.button ]
+                [ Button.view
+                    { style = Button.Link
+                    , size = Button.Medium
+                    , icon = Just Icon.Play
+                    , label = "COMPILE"
+                    , disabled = not config.compileButtonEnabled
+                    , attributes = []
+                    , action = Button.click config.onCompile
                     }
                 ]
-
-            Accepting version ->
-                [ viewLogo
-                , Checkbox.view
-                    { onChange = \_ -> config.mapMsg NoOp
-                    , checked = True
-                    , id = "accept_terms"
-                    , label =
-                        span [ Styles.termsLabel ]
-                            [ text "Please accept our "
-                            , a [ href <| TermsVersion.link version ] [ text "Terms of Service" ]
-                            , text " before saving."
-                            ]
+            , div [ Styles.button ]
+                [ viewSaveButton config ]
+            , div [ Styles.button ]
+                [ Button.view
+                    { style = Button.Link
+                    , size = Button.Medium
+                    , icon = Just Icon.Format
+                    , label = "FORMAT"
+                    , disabled = False
+                    , attributes = []
+                    , action = Button.click config.onFormat
                     }
                 ]
-
-            Accepted ->
-                [ viewLogo
-                , div [ Styles.button ]
-                    [ Button.view
-                        { style = Button.Link
-                        , size = Button.Medium
-                        , icon = Just Icon.Play
-                        , label = "COMPILE"
-                        , disabled = not config.compileButtonEnabled
-                        , attributes = []
-                        , action = Button.click config.onCompile
-                        }
-                    ]
-                , div [ Styles.button ]
-                    [ viewSaveButton config ]
-                , div [ Styles.button ]
-                    [ Button.view
-                        { style = Button.Link
-                        , size = Button.Medium
-                        , icon = Just Icon.Format
-                        , label = "FORMAT"
-                        , disabled = False
-                        , attributes = []
-                        , action = Button.click config.onFormat
-                        }
-                    ]
-                , div [ Styles.button ]
-                    [ Popout.view
-                        { open = config.model.shareOpen
-                        , disabled = config.revisionId == Nothing
-                        , onToggle = ToggleShare >> config.mapMsg
-                        , tooltip =
-                            config.revisionId
-                                |> Maybe.map
-                                    (\revisionId ->
-                                        div []
-                                            [ div [ Styles.copyLinkContainer ]
-                                                [ CopyLink.view
-                                                    { id = "direct"
-                                                    , url = directLink revisionId
-                                                    , title = "Direct Link (Medium, Embed.ly)"
-                                                    }
-                                                ]
-                                            , div [ Styles.copyLinkContainer ]
-                                                [ CopyLink.view
-                                                    { id = "embed"
-                                                    , url = embedLink revisionId
-                                                    , title = "Embed Link"
-                                                    }
-                                                ]
-                                            , div [ Styles.copyLinkContainer ]
-                                                [ CopyLink.view
-                                                    { id = "iframe"
-                                                    , url = iframe revisionId
-                                                    , title = "IFrame"
-                                                    }
-                                                ]
+            , div [ Styles.button ]
+                [ Popout.view
+                    { open = config.model.shareOpen
+                    , disabled = config.revisionId == Nothing
+                    , onToggle = ToggleShare >> config.mapMsg
+                    , tooltip =
+                        config.revisionId
+                            |> Maybe.map
+                                (\revisionId ->
+                                    div []
+                                        [ div [ Styles.copyLinkContainer ]
+                                            [ CopyLink.view
+                                                { id = "direct"
+                                                , url = directLink revisionId
+                                                , title = "Direct Link (Medium, Embed.ly)"
+                                                }
                                             ]
-                                    )
-                                |> Html.maybe
-                        , content =
-                            Button.view
-                                { style = Button.Link
-                                , size = Button.Medium
-                                , icon = Just Icon.Link
-                                , label = "SHARE"
-                                , disabled = config.revisionId == Nothing
-                                , attributes = []
-                                , action = Button.none
-                                }
-                        }
-                    ]
+                                        , div [ Styles.copyLinkContainer ]
+                                            [ CopyLink.view
+                                                { id = "embed"
+                                                , url = embedLink revisionId
+                                                , title = "Embed Link"
+                                                }
+                                            ]
+                                        , div [ Styles.copyLinkContainer ]
+                                            [ CopyLink.view
+                                                { id = "iframe"
+                                                , url = iframe revisionId
+                                                , title = "IFrame"
+                                                }
+                                            ]
+                                        ]
+                                )
+                            |> Html.maybe
+                    , content =
+                        Button.view
+                            { style = Button.Link
+                            , size = Button.Medium
+                            , icon = Just Icon.Link
+                            , label = "SHARE"
+                            , disabled = config.revisionId == Nothing
+                            , attributes = []
+                            , action = Button.none
+                            }
+                    }
                 ]
-    else
-        [ viewLogo ]
+            ]
 
 
 viewSocialLink : String -> String -> Icon.Icon -> Html msg

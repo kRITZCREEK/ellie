@@ -43,7 +43,6 @@ type alias Model =
     , previousHtmlCode : String
     , compileStage : CompileStage
     , saveState : SaveState
-    , isOnline : Bool
     , notifications : List Notification
     , vimMode : Bool
     , packagesChanged : Bool
@@ -69,7 +68,6 @@ model flags =
     , compileStage = CompileStage.Initial
     , currentRoute = NotFound
     , saveState = SaveState.Ready
-    , isOnline = flags.online
     , notifications = []
     , vimMode = flags.vimMode
     , packagesChanged = False
@@ -142,7 +140,6 @@ canSave model =
     in
     (stagedCodeChanged || isRevisionChanged model || not (isSavedProject model))
         && SaveState.canSave model.saveState
-        && model.isOnline
 
 
 isRevisionChanged : Model -> Bool

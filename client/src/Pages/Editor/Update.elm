@@ -80,7 +80,6 @@ type Msg
     | CompileRequested
     | CompileStageChanged CompileStage
     | CompileForSaveStarted Int
-    | OnlineChanged Bool
     | FormattingRequested
     | FormattingCompleted (Result ApiError String)
     | NotificationReceived Notification
@@ -338,11 +337,6 @@ update msg model =
             ( model
                 |> (\m -> { m | stagedHtmlCode = code })
             , Cmd.none
-            )
-
-        OnlineChanged isOnline ->
-            ( { model | isOnline = isOnline }
-            , onlineNotification isOnline
             )
 
         FormattingRequested ->

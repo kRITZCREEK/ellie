@@ -23,15 +23,9 @@ viewHeader model =
         , model = model.header
         , mapMsg = HeaderMsg
         , revisionId = model.clientRevision.id
-        , embedLinkButtonEnabled =
-            Routing.isSpecificRevision model.currentRoute
-        , saveButtonEnabled =
-            Model.canSave model
-        , compileButtonEnabled =
-            Model.canCompile model
-        , buttonsVisible =
-            RemoteData.isSuccess model.serverRevision
-                && model.isOnline
+        , embedLinkButtonEnabled = RemoteData.isSuccess model.serverRevision && Routing.isSpecificRevision model.currentRoute
+        , saveButtonEnabled = RemoteData.isSuccess model.serverRevision && Model.canSave model
+        , compileButtonEnabled = RemoteData.isSuccess model.serverRevision && Model.canCompile model
         , termsState =
             case model.saveState of
                 SaveState.AwaitingTermsAcceptance ->

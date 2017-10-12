@@ -15,9 +15,6 @@ import Pages.Editor.Update as Update exposing (Msg(..))
 port windowUnloadedIn : (() -> msg) -> Sub msg
 
 
-port online : (Bool -> msg) -> Sub msg
-
-
 port jsError : (String -> msg) -> Sub msg
 
 
@@ -128,8 +125,7 @@ codeMirror =
 subscriptions : Model -> Sub Msg
 subscriptions model =
     Sub.batch
-        [ online OnlineChanged
-        , jsError IframeJsError
+        [ jsError IframeJsError
         , compilerMessages
         , compileForSave
         , keyCombos model

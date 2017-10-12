@@ -8,7 +8,6 @@ import Window
 
 type alias Flags =
     { windowSize : Window.Size
-    , online : Bool
     , vimMode : Bool
     , latestTermsVersion : TermsVersion
     , acceptedTermsVersion : Maybe TermsVersion
@@ -19,7 +18,6 @@ decoder : Decoder Flags
 decoder =
     Decode.succeed Flags
         |> Decode.required "windowSize" windowSizeDecoder
-        |> Decode.required "online" Decode.bool
         |> Decode.required "vimMode" Decode.bool
         |> Decode.required "latestTermsVersion" TermsVersion.decoder
         |> Decode.required "acceptedTermsVersion" (Decode.nullable TermsVersion.decoder)
