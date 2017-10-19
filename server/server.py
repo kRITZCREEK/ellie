@@ -18,24 +18,18 @@ from flask import (Flask, jsonify, redirect, render_template, request, session,
 from opbeat.contrib.flask import Opbeat
 from werkzeug.routing import BaseConverter, HTTPException, ValidationError
 
-from . import assets, constants, package_search, storage
-from .classes import (ApiError, Constraint, Package, PackageInfo, PackageName,
-                      ProjectId, Version)
-
-T = TypeVar('T')
-
-
-def cat_optionals(data: Iterator[Optional[T]]) -> Iterator[T]:
-    for x in data:
-        if x is not None:
-            yield x
-
+from . import assets, constants, repository, search
+from .data.api_error import ApiError
+from .data.package import Package
+from .data.package_name import PackageName
+from .data.project_id import ProjectId
+from .data.version import Version
 
 app = Flask(__name__)
-app.secret_key = os.environ['COOKIE_SECRET'].encode('utf-8')
+app.secret_key = constants.COOKIE_SECRET
 app.config.update(
     SESSION_COOKIE_SECURE=constants.PRODUCTION,
-    PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 365 * 20
+    PERMANENT_SESSION_LIFETIME=constants.SESSION_LIFETIME
 )
 
 if constants.PRODUCTION:
@@ -55,7 +49,16 @@ class ProjectIdConverter(BaseConverter):
         return str(value)
 
 
+class VersionConverter(BaseConverter):
+    def to_python(self, value: str) -> Optional[Version]:
+        return Version.from_string(value)
+
+    def to_url(self, value: Version) -> str:
+        return str(value)
+
+
 app.url_map.converters['project_id'] = ProjectIdConverter
+app.url_map.converters['version'] = VersionConverter
 
 
 @app.errorhandler(ApiError)
@@ -100,15 +103,18 @@ def accept_terms(terms_version: int) -> Any:
     return jsonify({})
 
 
-@app.route('/api/packages/<string:user>/<string:project>/versions')
-def tags(user: str, project: str) -> Any:
-    cache_data = storage.get_searchable_packages()
-    key = PackageName(user, project)
+@app.route('/api/packages/<version:elm_version>/<string:user>/<string:project>/versions')
+def tags(elm_version: Version, user: str, project: str) -> Any:
+    package_name = PackageName(user, project)
+    versions = repository.get_versions_for_elm_version_and_package(
+        elm_version,
+        package_name
+    )
 
-    if key not in cache_data:
+    if len(versions) == 0:
         raise ApiError(404, 'Package not found')
 
-    return jsonify([v.to_json() for v in cache_data[key].versions])
+    return jsonify([v.to_json() for v in versions])
 
 
 @app.route('/api/search')
@@ -125,7 +131,7 @@ def search() -> Any:
     if parsed_elm_version is None:
         raise ApiError(400, 'elm version must be a semver string like 0.18.0')
 
-    packages = package_search.search(parsed_elm_version, query)
+    packages = repository.search(parsed_elm_version, query)
 
     return jsonify([p.to_json() for p in packages])
 
@@ -139,7 +145,7 @@ def get_upload_urls() -> Any:
     if project_id is None:
         raise ApiError(400, 'projectId must be a string')
 
-    if project_id_string is not None and not storage.revision_exists(project_id, 0):
+    if project_id_string is not None and not repository.revision_exists(project_id, 0):
         raise ApiError(404, 'revision not found')
 
     if project_id_string is not None and not storage.project_id_is_owned(project_id):
