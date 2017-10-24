@@ -15,7 +15,8 @@ import whoosh.analysis as analysis
 import whoosh.fields as fields
 import whoosh.index as index
 import whoosh.qparser as qparser
-from flask import request
+from flask import request, session
+from hashids import Hashids
 
 from . import constants
 from .data.package import Package
@@ -24,6 +25,7 @@ from .data.package_name import PackageName
 from .data.project_id import ProjectId
 from .data.revision import Revision
 from .data.revision_id import RevisionId
+from .data.user_id import UserId
 from .data.version import Version
 
 # TYPE VARS
@@ -211,6 +213,15 @@ def _parse_query(query_string: str) -> Any:
         return _parser.parse(query_string)
 
 
+def _write_session(key: str, value: Any) -> None:
+    session.permanent = True
+    session.update({'v1': {key: value}})
+
+
+def _read_session(key: str, default: Any) -> Any:
+    return session.get('v1', {}).get(key, default)
+
+
 # GLOBALS
 
 
@@ -219,6 +230,30 @@ _last_updated = datetime.utcnow()
 
 
 # API
+
+
+def get_user_id() -> Optional[UserId]:
+    final_id = None
+    current_as_json = _read_session('user_id', None)
+    if current_as_json is None:
+        final_id = UserId.generate()
+        _write_session('user_id', final_id.to_json())
+    else:
+        parsed = UserId.from_json(current_as_json)
+        if parsed is None:
+            final_id = UserId.generate()
+            _write_session('user_id', final_id.to_json())
+        else:
+            final_id = parsed
+    return final_id
+
+
+def accept_terms(terms_version: int) -> None:
+    _write_session('accepted_terms_version', terms_version)
+
+
+def get_accepted_terms_version() -> Optional[int]:
+    return _read_session('accepted_terms_version', None)
 
 
 def save_searchable_package_infos(infos: List[PackageInfo]) -> None:
@@ -293,25 +328,6 @@ def get_versions_for_elm_version_and_package(elm_version: Version, name: Package
     return _tags_lookup[name][elm_version]
 
 
-def get_revision_upload_signature(project_id: ProjectId,
-                                  revision_number: int) -> Any:
-    data = _s3_client.generate_presigned_post(
-        Bucket=constants.S3_BUCKET,
-        Key='revisions/' + str(project_id) + '/' + str(revision_number) +
-        '.json',
-        Fields={'acl': 'public-read',
-                'Content-Type': 'application/json'},
-        Conditions=[{
-            'acl': 'public-read'
-        }, {
-            'Content-Type': 'application/json'
-        }])
-
-    data['projectId'] = str(project_id)
-    data['revisionNumber'] = revision_number
-    return data
-
-
 def revision_exists(id: RevisionId) -> bool:
     try:
         _s3_client.head_object(
@@ -341,6 +357,19 @@ def get_revision(id: RevisionId) -> Optional[Revision]:
         return None
 
 
+def get_latest_defaults(elm_version: Version) -> Optional[Tuple[Package, Package]]:
+    Dict[PackageName, Dict[Version, List[Version]]]
+    core_key = PackageName('elm-lang', 'core')
+    html_key = PackageName('elm-lang', 'html')
+    if elm_version not in _tags_lookup[core_key] or elm_version not in _tags_lookup[html_key]:
+        return None
+    else:
+        return (
+            Package(core_key, max(_tags_lookup[core_key][elm_version])),
+            Package(html_key, max(_tags_lookup[html_key][elm_version]))
+        )
+
+
 def search(elm_version: Version, query_string: str) -> List[Package]:
     _refresh_local_data()
     idx = _search_index.get(elm_version)
@@ -350,3 +379,39 @@ def search(elm_version: Version, query_string: str) -> List[Package]:
     with idx.searcher() as searcher:
         results = searcher.search(_parse_query(query_string), limit=5)
         return [r.fields()['full_package'] for r in results]
+
+
+def get_revision_upload_signature(id: RevisionId) -> Any:
+    data = _s3_client.generate_presigned_post(
+        Bucket=constants.S3_BUCKET,
+        Key='revisions/' + str(id.project_id) + '/' + str(id.revision_number) +
+        '.json',
+        Fields={'acl': 'public-read',
+                'Content-Type': 'application/json'},
+        Conditions=[{
+            'acl': 'public-read'
+        }, {
+            'Content-Type': 'application/json'
+        }])
+
+    data['projectId'] = str(id.project_id)
+    data['revisionNumber'] = id.revision_number
+    return data
+
+
+def get_result_upload_signature(id: RevisionId) -> Any:
+    data = _s3_client.generate_presigned_post(
+        Bucket=constants.S3_BUCKET,
+        Key='revisions/' + str(id.project_id) + '/' + str(id.revision_number) +
+        '.html',
+        Fields={'acl': 'public-read',
+                'Content-Type': 'text/html'},
+        Conditions=[{
+            'acl': 'public-read'
+        }, {
+            'Content-Type': 'text/html'
+        }])
+
+    data['projectId'] = str(id.project_id)
+    data['revisionNumber'] = id.revision_number
+    return data

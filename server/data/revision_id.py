@@ -8,6 +8,9 @@ class RevisionId(object):
         self.project_id = project_id
         self.revision_number = revision_number
 
+    def __str__(self) -> str:
+        return str(self.project_id) + '/' + str(self.revision_number)
+
     def to_json(self) -> Any:
         return {
             'projectId': self.project_id.to_json(),

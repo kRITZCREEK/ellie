@@ -18,11 +18,12 @@ from flask import (Flask, jsonify, redirect, render_template, request, session,
 from opbeat.contrib.flask import Opbeat
 from werkzeug.routing import BaseConverter, HTTPException, ValidationError
 
-from . import assets, constants, repository, search
+from . import assets, constants, repository
 from .data.api_error import ApiError
 from .data.package import Package
 from .data.package_name import PackageName
 from .data.project_id import ProjectId
+from .data.revision_id import RevisionId
 from .data.version import Version
 
 app = Flask(__name__)
@@ -95,11 +96,7 @@ def parse_int(string: str) -> Optional[int]:
 
 @app.route('/api/terms/<int(min=0):terms_version>/accept', methods=['POST'])
 def accept_terms(terms_version: int) -> Any:
-    session.permanent = True
-    if 'v1' not in session:
-        session['v1'] = {}
-
-    session['v1']['accepted_terms_version'] = terms_version
+    repository.accept_terms(terms_version)
     return jsonify({})
 
 
@@ -136,54 +133,44 @@ def search() -> Any:
     return jsonify([p.to_json() for p in packages])
 
 
-@app.route('/api/upload')
-def get_upload_urls() -> Any:
+@app.route('/api/upload/existing')
+def get_existing_upload_urls() -> Any:
     project_id_string = request.args.get('projectId')
-
-    project_id = ProjectId.from_string(project_id_string) if (
-        project_id_string is not None) else ProjectId.generate()
+    if project_id_string is None:
+        raise ApiError(400, 'Required parameter `projectId` was not provided')
+    project_id = ProjectId.from_string(project_id_string)
     if project_id is None:
-        raise ApiError(400, 'projectId must be a string')
+        raise ApiError(400, 'Unparseable `projectId` parameter')
 
-    if project_id_string is not None and not repository.revision_exists(project_id, 0):
-        raise ApiError(404, 'revision not found')
-
-    if project_id_string is not None and not storage.project_id_is_owned(project_id):
-        raise ApiError(403, 'you don\'t own this revision')
-
-    revision_string = request.args.get('revisionNumber')
-    if project_id_string is not None and revision_string is None:
+    revision_number_string = request.args.get('revisionNumber')
+    if revision_number_string is None:
         raise ApiError(
-            400, 'revision number must be provided along with project id')
-
-    revision_number = parse_int(revision_string) if (revision_string is
-                                                     not None) else 0
+            400, 'Required parameter `revisionNumber` was not provided')
+    revision_number = parse_int(revision_number_string)
     if revision_number is None:
-        raise ApiError(400, 'revision number must be an integer')
-    if revision_number < 0:
-        raise ApiError(400, 'revision number must be 0 or greater')
+        raise ApiError(400, 'Unparseable `revisionNumber` must be an integer')
+    if revision_number < 1:
+        raise ApiError(400, 'Parameter `revisionNumber` must be positive')
 
-    if storage.revision_exists(project_id, revision_number):
-        raise ApiError(400, 'the revision you wanted to create already exists')
+    expected_revision_id = RevisionId(project_id, revision_number - 1)
+    if not repository.revision_exists(expected_revision_id):
+        raise ApiError(400, 'Revision with ID `' +
+                       str(expected_revision_id) + '` does not exist to be updated')
 
     response = jsonify({
-        'revision': storage.get_revision_upload_signature(project_id, revision_number),
-        'result': storage.get_result_upload_signature(project_id, revision_number)
+        'revision': repository.get_revision_upload_signature(expected_revision_id),
+        'result': repository.get_result_upload_signature(expected_revision_id)
     })
-
-    storage.add_project_id_ownership(project_id, response)
 
     return response
 
 
 @app.route('/api/revisions/default')
 def get_default_revision() -> Any:
-    cache_data = storage.get_searchable_packages()
-    default_html = cache_data[PackageName(
-        'elm-lang', 'html')].latest_by_elm_version[Version(0, 18, 0)]
-    default_core = cache_data[PackageName(
-        'elm-lang', 'core')].latest_by_elm_version[Version(0, 18, 0)]
-
+    result = repository.get_latest_defaults(Version(0, 18, 0))
+    if result is None:
+        raise ApiError(500, 'Could not load default packages')
+    (default_core, default_html) = result
     return jsonify({
         'packages': [default_core.to_json(), default_html.to_json()],
         'elmVersion': '0.18.0',
@@ -214,14 +201,6 @@ main =
 </html>
 '''
     })
-
-
-@app.route('/api/revisions/<project_id:project_id>/<int(min=0):revision_number>')
-def get_revision(project_id: ProjectId, revision_number: int) -> Any:
-    revision = storage.get_revision(project_id, revision_number)
-    if revision is None:
-        raise ApiError(404, 'revision not found')
-    return jsonify(revision.to_json())
 
 
 def remove_ansi_colors(input: str) -> str:
@@ -284,12 +263,13 @@ def existing(project_id: ProjectId, revision_number: int) -> Any:
                       revision_number=revision_number)
         return redirect(url, code=301)
 
-    revision = storage.get_revision(project_id, revision_number)
+    revision_id = RevisionId(project_id, revision_number)
+    revision = repository.get_revision(revision_id)
     if revision is None:
         return redirect('new', code=303)
 
     data = {
-        'accepted_terms_version': session.get('v1', {}).get('accepted_terms_version'),
+        'accepted_terms_version': repository.get_accepted_terms_version(),
         'title': revision.title,
         'description': revision.description,
         'url': EDITOR_CONSTANTS['SERVER_HOSTNAME'] + '/' + str(project_id) + '/' + str(revision_number)
@@ -323,7 +303,9 @@ def embed(project_id: ProjectId, revision_number: int) -> Any:
         return redirect(url, code=301)
 
     data = {}
-    revision = storage.get_revision(project_id, revision_number)
+
+    revision_id = RevisionId(project_id, revision_number)
+    revision = repository.get_revision(revision_id)
     if revision is not None:
         data['title'] = revision.title
         data['description'] = revision.description
@@ -360,7 +342,8 @@ def oembed() -> Any:
     if revision_number is None:
         raise ApiError(404, 'revision not found')
 
-    revision = storage.get_revision(project_id, revision_number)
+    revision_id = RevisionId(project_id, revision_number)
+    revision = repository.get_revision(revision_id)
     if revision is None:
         raise ApiError(404, 'revision not found')
 

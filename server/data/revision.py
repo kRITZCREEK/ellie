@@ -2,6 +2,7 @@ from typing import Any, Iterator, List, NamedTuple, Optional, TypeVar
 
 from .package import Package
 from .revision_id import RevisionId
+from .user_id import UserId
 from .version import Version
 
 T = TypeVar('T')
@@ -22,7 +23,7 @@ class _RevisionBase(NamedTuple):
     html_code: str
     packages: List[Package]
     id: Optional[RevisionId]
-    owned: bool
+    user_id: UserId
     snapshot: Any
     elm_version: Version
     accepted_terms: Optional[int]
@@ -37,7 +38,7 @@ class Revision(_RevisionBase):
             'htmlCode': self.html_code,
             'packages': [p.to_json() for p in self.packages],
             'id': self.id.to_json() if self.id is not None else None,
-            'owned': self.owned,
+            'userId': self.user_id.to_json(),
             'snapshot': self.snapshot,
             'elmVersion': self.elm_version.to_json(),
             'acceptedTerms': self.accepted_terms
