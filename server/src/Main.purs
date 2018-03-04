@@ -58,6 +58,8 @@ setup = do
   port ← Maybe.fromMaybe 1337 <$> (_ >>= Int.fromString) <$> (Eff.liftEff (Process.lookupEnv "PORT"))
   packageSite ← Maybe.fromMaybe "http://package.elm-lang.org" <$> Eff.liftEff (Process.lookupEnv "PACKAGE_SITE")
   index ← Eff.liftEff $ Ref.newRef Nothing
+  -- NOTE: I'd suggest to use one of the newtypes from purescript-datetime here,
+  -- it has conversions between the different time units as well iirc.
   defaultPackages ← Cache.create (15 * Time.minutes)
   userWorkspaces ← Eff.liftEff $ Ref.newRef Map.empty
   let jwtSecret = Secret "abc123"

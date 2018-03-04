@@ -216,9 +216,10 @@ compile elm html packages userId env = IO.liftIO do
   let elmPath = parseElmPath elm
   let htmlPath = "index.html"
 
-  if packagesChanged
-    then Elm.install workspace.location packagesSet
-    else pure unit
+  -- NOTE: if p then action else pure unit == when b action
+  -- It's pretty idiomatic to use `when` in these situations
+  when packagesChanged
+    (Elm.install workspace.location packagesSet)
 
   if elmChanged
     then do
@@ -232,7 +233,7 @@ compile elm html packages userId env = IO.liftIO do
         errors ← Elm.compile { root: workspace.location, entry: elmPath, output: "build.js", debug: true }
         pure $ Array.filter (unwrap >>> _.level >>> (/=) "warning") errors
       else pure workspace.currentErrors
-  
+
   if htmlChanged
     then do
       fixed ← fixHtml html

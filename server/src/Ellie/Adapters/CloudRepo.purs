@@ -117,10 +117,8 @@ getLatestRevisionNumber pid env = do
       objects <-
         liftAws $
           Aws.listObjects env.awsClient { prefix: awsKey, bucket: env.bucket }
-      let
-        latest =
-          findLatest objects
-      case latest of
+      -- NOTE: I'd probably just inline this
+      case findLatest objects of
         Just value -> do
           IO.liftIO $
             Redis.set env.redisClient redisKey (Foreign.encode value)
@@ -132,6 +130,9 @@ getLatestRevisionNumber pid env = do
     processKey key =
       key
         # FilePath.basename
+        -- NOTE: This seems wrong? I think you want to use Alternative here?
+        -- This will always give you Nothing unless your file ends in
+        -- `.json.html`
         # String.stripSuffix (Pattern ".json")
         >>= String.stripSuffix (Pattern ".html")
         >>= (Foreign.decodeJSON >>> Except.runExcept >>> Either.hush)
@@ -166,9 +167,9 @@ revisionExists revisionId@(Revision.Id { projectId, revisionNumber }) env = do
             , bucket: env.bucket
             }
       case unitOrError of
-        Left e | e.code == "404" -> pure $ false 
+        Left e | e.code == "404" -> pure false
         Left e -> Except.throwError (error e.message)
-        Right _ -> pure  true
+        Right _ -> pure true
 
 
 saveRevision :: ∀ m r. MonadIO m => MonadThrow Error m => Revision.Id -> Revision -> Env r -> m Unit
@@ -230,6 +231,8 @@ saveUser (User.Id uuid) user env = IO.liftIO do
 
 verifyUser ∷ ∀ m r. MonadIO m ⇒ Jwt → Env r → m (Maybe User.Id)
 verifyUser token env = IO.liftIO do
+  -- NOTE: It might make sense to define `attempt` for IO, like it's defined for
+  -- Aff to make these situations a little nicer
   maybeUserId ← (Just <$> Jwt.decode env.jwtSecret token) `catchError` \_ -> pure Nothing
   case maybeUserId of
     Just userId → getUser (User.Id (UniqueId userId)) env <#> (map Entity.key)

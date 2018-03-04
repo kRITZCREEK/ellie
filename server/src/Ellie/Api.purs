@@ -3,6 +3,7 @@ module Ellie.Api where
 import Prelude
 
 import Control.Monad.Except (runExcept) as Except
+import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT)
 import Control.Monad.Trans.Class (lift)
 import Data.Either (Either(..))
 import Data.Entity (Entity)
@@ -13,11 +14,11 @@ import Data.Foreign.Class (decode, encode) as Foreign
 import Data.Foreign.Generic (encodeJSON) as Foreign
 import Data.Foreign.Index ((!))
 import Data.Maybe (Maybe(..))
-import Data.Maybe as Maybe
 import Data.String (Pattern(Pattern))
 import Data.String (stripPrefix) as String
 import Data.TemplateString.Unsafe (template) as String
 import Data.Url as Url
+import Debug as Debug
 import Ellie.Domain.Assets (class Assets)
 import Ellie.Domain.Assets as Assets
 import Ellie.Domain.Platform (class Platform)
@@ -35,19 +36,15 @@ import Ellie.Types.User as User
 import Server.Action (ActionT)
 import Server.Action as Action
 import System.Jwt (Jwt(..))
-import Debug as Debug
 
 
 getRevision ∷ ∀ m. Monad m ⇒ RevisionRepo m ⇒ ActionT m Unit
 getRevision = do
-  projectId ← Action.getParam "projectId"
-  revisionNumber ← Action.getParam "revisionNumber"
-  let
-    maybeRevisionId =
-      { projectId: _, revisionNumber: _ }
-        <$> projectId
-        <*> revisionNumber
-        <#> Revision.Id
+  -- NOTE: I'm going to stop with the MaybeT's now :D Sorry
+  maybeRevisionId ← runMaybeT do
+    projectId ← MaybeT $ Action.getParam "projectId"
+    revisionNumber ← MaybeT $ Action.getParam "revisionNumber"
+    pure $ Revision.Id { projectId, revisionNumber }
   case maybeRevisionId of
     Just revisionId → do
       maybeRevision ← lift $ RevisionRepo.retrieve revisionId
@@ -75,9 +72,12 @@ searchPackages = do
 
 me ∷ ∀ m. Monad m ⇒ UserRepo m ⇒ ActionT m Unit
 me = do
-  maybeToken ← Action.getParam "token"
-  maybeUserId ← Maybe.maybe (pure Nothing) (lift <<< UserRepo.verify) maybeToken
-  maybeUserEntity ← Maybe.maybe (pure Nothing) (lift <<< UserRepo.retrieve) maybeUserId
+  -- NOTE: You can nest do statements like this. Sometimes it also makes sense
+  -- to break these out into a where.
+  maybeUserEntity ← runMaybeT do
+    token ← MaybeT $ Action.getParam "token"
+    userId ← MaybeT $ lift $ UserRepo.verify token
+    MaybeT $ lift $ UserRepo.retrieve userId
   { token, user } ←
     case maybeUserEntity of
       Just entity → do
@@ -95,8 +95,10 @@ me = do
 
 saveSettings ∷ ∀ m. Monad m ⇒ UserRepo m ⇒ ActionT m Unit
 saveSettings = do
-  maybeUser ← authorize
-  case maybeUser of
+  -- NOTE this `>>= case _ of` is a pretty common pattern. I like it as it
+  -- removes a name that is usually immeditaly superseeded by the pattern
+  -- matched names.
+  authorize >>= case _ of
     Nothing → Action.setStatus 401
     Just entity → do
       let userId = Entity.key entity
@@ -109,17 +111,13 @@ saveSettings = do
           lift $ UserRepo.save userId newUser
           Action.setStatus 204
   where
+    -- NOTE: Often MaybeT can be used to make these situations more concise
     authorize ∷ ActionT m (Maybe (Entity User.Id User))
-    authorize = do
-      maybeTokenHeader ← Action.getHeader "Authorization"
-      let maybeToken = maybeTokenHeader >>= String.stripPrefix (Pattern "Bearer ")
-      case maybeToken of
-        Nothing → pure Nothing
-        Just token → do
-          maybeUserId ← lift $ UserRepo.verify (Jwt token)
-          case maybeUserId of
-            Nothing → pure Nothing
-            Just userId → lift $ UserRepo.retrieve userId
+    authorize = runMaybeT do
+      tokenHeader ← MaybeT $ Action.getHeader "Authorization"
+      token ← MaybeT $ pure $ String.stripPrefix (Pattern "Bearer ") tokenHeader
+      userId ← MaybeT $ lift $ UserRepo.verify (Jwt token)
+      MaybeT $ lift $ UserRepo.retrieve userId
 
 
 formatCode ∷ ∀ m. Monad m ⇒ Platform m ⇒ ActionT m Unit
@@ -144,13 +142,16 @@ formatCode = do
 
 result ∷ ∀ m. Monad m ⇒ UserRepo m ⇒ Platform m ⇒ ActionT m Unit
 result = do
-  maybeUser ← authorizeParam 
+  maybeUser ← authorizeParam
   case maybeUser of
     Nothing → Action.setStatus 401
     Just entity → do
       { javascript, html } ← lift $ Platform.result $ Entity.key entity
       format ← Action.getParam "format"
-      case (Debug.log format) of
+      -- NOTE: Debug.log is available in the commonly used purescript-debug
+      -- package as `spy` (It also has a Warning constraint on it, so you can't
+      -- accidentally commit it if your CI errors on Warnings.)
+      case Debug.log format of
         Just "javascript" → Action.setFileBody javascript
         Just "html" → Action.setFileBody html
         _ → Action.setStatus 404
@@ -159,7 +160,7 @@ result = do
 newUi ∷ ∀ m. Monad m ⇒ Assets m ⇒ UserRepo m ⇒ ActionT m Unit
 newUi = do
   Action.setStatus 200
-  (lift htmlContent) >>= Action.setStringBody
+  lift htmlContent >>= Action.setStringBody
   where
     htmlTemplate ∷ String
     htmlTemplate =
@@ -201,14 +202,9 @@ newUi = do
           <*> (Url.href <$> Assets.assetUrl "images/logo.png")
       pure $ String.template htmlTemplate parameters
 
-
+-- NOTE: Another opportunity for MaybeT here
 authorizeParam ∷ ∀ m. Monad m ⇒ UserRepo m ⇒ ActionT m (Maybe (Entity User.Id User))
-authorizeParam = do
-  maybeToken ← Action.getParam "token"
-  case maybeToken of
-    Nothing → pure Nothing
-    Just token → do
-      maybeUserId ← lift $ UserRepo.verify (Jwt token)
-      case maybeUserId of
-        Nothing → pure Nothing
-        Just userId → lift $ UserRepo.retrieve userId
+authorizeParam = runMaybeT do
+  token ← MaybeT $ Action.getParam "token"
+  userId ← MaybeT $ lift $ UserRepo.verify (Jwt token)
+  MaybeT $ lift $ UserRepo.retrieve userId
